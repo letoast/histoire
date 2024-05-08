@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
+import DynamicPublicDirectory from 'vite-multiple-assets'
 import replace from '@rollup/plugin-replace'
 import type { Plugin } from 'histoire'
 import type { Nuxt } from '@nuxt/schema'
@@ -110,12 +111,14 @@ export async function setupVue3 () {
 }
 
 async function useNuxtViteConfig() {
-  const { loadNuxt, buildNuxt } = await import('@nuxt/kit')
+  const { loadNuxt, loadNuxtConfig, buildNuxt, createResolver, findPath } = await import('@nuxt/kit')
+  const { extends: nuxtConfigExtends } = await loadNuxtConfig({})
   const nuxt = await loadNuxt({
     // cwd: process.cwd(),
     ready: false,
     dev: true,
     overrides: {
+      extends: nuxtConfigExtends,
       devtools: { enabled: false },
       ssr: false,
       experimental: {
@@ -155,8 +158,20 @@ async function useNuxtViteConfig() {
           }
         })
 
-        nuxt.hook('vite:configResolved', (config, { isClient }) => {
+        nuxt.hook('vite:configResolved', async (config, { isClient }) => {
           if (isClient) {
+            const publicDirs: string[] = []
+
+            const { resolvePath } = createResolver(import.meta.url)
+            for await (const layer of nuxt.options._layers) {
+              if (await findPath(await resolvePath(join(layer.config.srcDir || layer.cwd, 'public')), undefined, 'dir')) {
+                publicDirs.push(
+                  join('./', relative(nuxt.options.srcDir, layer.config.srcDir || layer.cwd), 'public'),
+                )
+              }
+            }
+            config.plugins.push(DynamicPublicDirectory(publicDirs))
+
             resolve(config)
           }
         })
